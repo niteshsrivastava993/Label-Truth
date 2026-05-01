@@ -1,0 +1,7 @@
+{
+  "name": "Label Truth",
+  "description": "A mobile-first PWA for scanning food labels and checking them against your health profile.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
