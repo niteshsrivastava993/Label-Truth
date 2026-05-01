@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { User } from "../models/User.js";
-import { Scan } from "../models/Scan.js";
+import { User } from "../models/user.js";
+import { Scan } from "../models/scan.js";
 import cloudinary from "../lib/cloudinary.js";
 
 export const performScan = async (req: any, res: any) => {

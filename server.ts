@@ -9,9 +9,9 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import mongoSanitize from "express-mongo-sanitize";
 import { connectDB } from "./src/lib/db.js";
-import { User } from "./src/models/User.js";
-import { Scan } from "./src/models/Scan.js";
-import { performScan, saveScan } from "./src/controllers/scanController.js";
+import { User } from "./src/models/user.js";
+import { Scan } from "./src/models/scan.js";
+import { performScan, saveScan } from "./src/controllers/scan-controller.js";
 
 dotenv.config();
 
