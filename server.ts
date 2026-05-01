@@ -15,8 +15,18 @@ import { performScan, saveScan } from "./src/controllers/scan-controller.js";
 
 dotenv.config();
 
+// --- GLOBAL ERROR HANDLERS (CRITICAL FOR PRODUCTION) ---
+process.on('uncaughtException', (err) => {
+  console.error('CRITICAL: Uncaught Exception:', err);
+  // Optional: keep running or exit
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
@@ -52,9 +62,6 @@ const upload = multer({
     fileSize: 5 * 1024 * 1024 // 5MB limit
   }
 });
-
-// Database Connection
-connectDB();
 
 // Auth Middleware
 const authenticateToken = (req: any, res: any, next: any) => {
@@ -164,16 +171,31 @@ app.get("/api/scan/history", authenticateToken, async (req: any, res) => {
   }
 });
 
-// --- VITE MIDDLEWARE ---
+// --- VITE MIDDLEWARE & SERVER START ---
 
 async function startServer() {
+  console.log("Starting server initialization...");
+  
+  // 1. Connect Database
+  try {
+    await connectDB();
+    console.log("Database connection sequence complete.");
+  } catch (dbErr) {
+    console.error("CRITICAL: Database connection failed during startup:", dbErr);
+    // On Render, we might want to continue or exit depending on strategy.
+    // For now, we continue to allow the process to stay alive for debugging.
+  }
+
+  // 2. Setup Vite or Static Serving
   if (process.env.NODE_ENV !== "production") {
+    console.log("Development mode: Initializing Vite middleware...");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
+    console.log("Production mode: Setting up static file serving...");
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
@@ -181,9 +203,14 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  // 3. Listen
+  app.listen(Number(PORT), "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log("Ready to handle requests.");
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("FATAL: Server failed to start:", err);
+  process.exit(1);
+});
