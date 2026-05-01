@@ -1,59 +1,60 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import multer from "multer";
-import { User } from "./src/models/User.ts";
-import { Scan } from "./src/models/Scan.ts";
-import { performScan, saveScan } from "./src/controllers/scanController.ts";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
+import mongoSanitize from "express-mongo-sanitize";
+import { connectDB } from "./src/lib/db.js";
+import { User } from "./src/models/User.js";
+import { Scan } from "./src/models/Scan.js";
+import { performScan, saveScan } from "./src/controllers/scanController.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
-// Check Gemini API Key on startup
-const rawGeminiKey = process.env.GEMINI_API_KEY;
-if (rawGeminiKey) {
-  const trimmedKey = rawGeminiKey.trim();
-  console.log(`GEMINI_API_KEY loaded. Length: ${trimmedKey.length}. Prefix: ${trimmedKey.substring(0, 6)}... Suffix: ...${trimmedKey.substring(trimmedKey.length - 4)}`);
-} else {
-  console.warn("GEMINI_API_KEY is missing in environment variables.");
-}
+// Security & Middlewares
+app.use(cors({
+  origin: [FRONTEND_URL, "http://localhost:3000"],
+  credentials: true
+}));
 
-// Check MongoDB URI on startup
-const rawMongoUri = process.env.MONGODB_URI;
-if (rawMongoUri) {
-  const trimmedUri = rawMongoUri.trim();
-  console.log(`MONGODB_URI loaded. Length: ${trimmedUri.length}. Prefix: ${trimmedUri.substring(0, 15)}...`);
-} else {
-  console.warn("MONGODB_URI is missing in environment variables.");
-}
+app.use(express.json({ limit: '10mb' }));
+app.use(mongoSanitize());
 
-app.use(express.json());
+// Rate Limiting to prevent API abuse
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: "Too many requests from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use("/api/", limiter);
+
+// Anti-Sleep / Health Check
+app.get("/api/ping", (req, res) => {
+  res.status(200).send("pong");
+});
 
 // Multer setup for image uploads
-const upload = multer({ storage: multer.memoryStorage() });
-
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI?.trim();
-if (MONGODB_URI) {
-  console.log(`Attempting to connect to MongoDB with prefix: ${MONGODB_URI.substring(0, 15)}...`);
-  if (!MONGODB_URI.startsWith("mongodb://") && !MONGODB_URI.startsWith("mongodb+srv://")) {
-    console.error(`CRITICAL: Invalid MONGODB_URI scheme. It starts with: "${MONGODB_URI.substring(0, 10)}..."`);
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
   }
-  mongoose.connect(MONGODB_URI)
-    .then(() => console.log("Successfully connected to MongoDB"))
-    .catch((err) => {
-      console.error("MongoDB connection error details:", err);
-    });
-} else {
-  console.warn("MONGODB_URI is missing. Please check your .env or Secrets panel.");
-}
+});
+
+// Database Connection
+connectDB();
 
 // Auth Middleware
 const authenticateToken = (req: any, res: any, next: any) => {

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
 });
 
 // Add token to requests
@@ -20,7 +20,6 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      // Removed window.location.href to allow ProtectedRoute to handle redirection gracefully
     }
     return Promise.reject(error);
   }
@@ -28,28 +27,18 @@ api.interceptors.response.use(
 
 export const authService = {
   login: async (credentials: any) => {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const mockUser = {
-      userId: 'mock-123',
-      name: credentials.email.split('@')[0],
-      email: credentials.email,
-      token: 'mock-token'
-    };
-    localStorage.setItem('token', mockUser.token);
-    localStorage.setItem('user', JSON.stringify(mockUser));
-    return { token: mockUser.token, user: mockUser, email: mockUser.email };
+    const response = await api.post('/auth/login', credentials);
+    const { token, user } = response.data;
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(user));
+    return response.data;
   },
   register: async (userData: any) => {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const mockUser = {
-      userId: 'mock-123',
-      name: userData.name,
-      email: userData.email,
-      token: 'mock-token'
-    };
-    localStorage.setItem('token', mockUser.token);
-    localStorage.setItem('user', JSON.stringify(mockUser));
-    return { token: mockUser.token, user: mockUser };
+    const response = await api.post('/auth/register', userData);
+    const { token, user } = response.data;
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(user));
+    return response.data;
   },
   logout: () => {
     localStorage.removeItem('token');
@@ -63,29 +52,20 @@ export const authService = {
 
 export const profileService = {
   updateProfile: async (healthConditions: string[], allergies: string[]) => {
-    await new Promise(resolve => setTimeout(resolve, 800));
+    const response = await api.put('/profile', { healthConditions, allergies });
     const user = JSON.parse(localStorage.getItem('user') || '{}');
-    const updatedUser = { 
-      ...user, 
-      healthConditions,
-      allergies 
-    };
+    const updatedUser = { ...user, healthConditions: response.data.healthConditions, allergies: response.data.allergies };
     localStorage.setItem('user', JSON.stringify(updatedUser));
     return updatedUser;
   },
   getProfile: async () => {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    return {
-      healthConditions: user.healthConditions || [],
-      allergies: user.allergies || []
-    };
+    const response = await api.get('/profile');
+    return response.data;
   }
 };
 
 export const scanService = {
   performScan: async (imageFile: File) => {
-    // This is currently handled in the frontend Scan.tsx but keeping standard structure
     const formData = new FormData();
     formData.append('image', imageFile);
     const response = await api.post('/scan', formData, {
@@ -96,21 +76,14 @@ export const scanService = {
     return response.data;
   },
   getHistory: async () => {
-    await new Promise(resolve => setTimeout(resolve, 800));
-    const history = JSON.parse(localStorage.getItem('mockHistory') || '[]');
-    return history;
+    const response = await api.get('/scan/history');
+    return response.data;
   },
   saveResults: async (analysis: any, imageData: string) => {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const history = JSON.parse(localStorage.getItem('mockHistory') || '[]');
-    const newScan = {
-      ...analysis,
-      id: Date.now().toString(),
-      imageUrl: imageData,
-      createdAt: new Date().toISOString()
-    };
-    localStorage.setItem('mockHistory', JSON.stringify([newScan, ...history].slice(0, 10)));
-    return { success: true };
+    // Backend performScan now saves results automatically if authenticated.
+    // This endpoint can be used if we need to explicitly save a specific analysis.
+    const response = await api.post('/scan/save', { analysis, imageData });
+    return response.data;
   }
 };
 

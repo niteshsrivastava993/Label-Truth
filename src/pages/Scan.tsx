@@ -2,8 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera, Image as ImageIcon, Loader2, RotateCcw, AlertTriangle, CheckCircle2, Sparkles, History, BookOpen } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
-import { scanService, profileService } from '../services/api';
+import { scanService } from '../services/api';
 
 export default function Scan() {
   const navigate = useNavigate();
@@ -53,121 +52,7 @@ export default function Scan() {
     setError(null);
     
     try {
-      // 1. Get user profile for context
-      let healthConditions: string[] = [];
-      let allergies: string[] = [];
-      try {
-        const profile = await profileService.getProfile();
-        healthConditions = profile.healthConditions || [];
-        allergies = profile.allergies || [];
-      } catch (err) {
-        console.warn('Could not fetch user profile for context, proceeding with generic analysis');
-      }
-
-      // 2. Initialize AI
-      const ai = new GoogleGenAI({ apiKey: (process.env as any).GEMINI_API_KEY });
-      
-      const prompt = `Act as the core AI engine for "Label Truth" Health App.
-Analyze this product label Specifically for hidden sugars, harmful chemicals, and bad preservatives.
-
-User Health Profile:
-- Conditions: [${healthConditions.join(", ")}]
-- Allergies: [${allergies.join(", ")}]
-
-Objectives:
-1. OCR: Extract product name and ingredients.
-2. Hidden Dangers: Identify disguised sugars (syrups, maltodextrin etc) and harmful additives.
-3. Marketing Gimmick Audit: Compare marketing claims (e.g. "No Added Sugar") vs reality.
-4. Truth Decoder: Translate complex ingredients to 5th-grade English.
-5. Verdict: Provide a health score (1-10), a simple 2-line explanation, and a confidence_score (0.0 to 1.0).
-6. Error Handling: If the label is torn or unreadable, set confidence_score < 0.3.
-
-Output MUST be strictly JSON.`;
-
-      // ... base64 conversion ...
-      const base64Data = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const base64 = (reader.result as string).split(',')[1];
-          resolve(base64);
-        };
-        reader.readAsDataURL(file);
-      });
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: file.type
-                }
-              }
-            ]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              productName: { type: Type.STRING },
-              confidenceScore: { type: Type.NUMBER },
-              safetyVerdict: { 
-                type: Type.STRING,
-                enum: ["SAFE", "MODERATE", "UNSAFE"]
-              },
-              overallHealthScore: { type: Type.NUMBER },
-              simpleExplanation: { type: Type.STRING },
-              criticalWarnings: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              conditionImpact: {
-                type: Type.OBJECT,
-                additionalProperties: { type: Type.STRING }
-              },
-              marketingClaims: { type: Type.STRING },
-              theReality: { type: Type.STRING },
-              hiddenSugars: { 
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              harmfulChemicals: { 
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              isDeceptive: { type: Type.BOOLEAN },
-              simplifiedIngredients: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    scientificName: { type: Type.STRING },
-                    simpleName: { type: Type.STRING },
-                    whatItActuallyIs: { type: Type.STRING },
-                    safetyLevel: { 
-                      type: Type.STRING,
-                      enum: ["Safe", "Caution", "Avoid"]
-                    }
-                  },
-                  required: ["scientificName", "simpleName", "whatItActuallyIs", "safetyLevel"]
-                }
-              }
-            },
-            required: ["productName", "safetyVerdict", "overallHealthScore", "simpleExplanation", "criticalWarnings", "conditionImpact", "marketingClaims", "theReality", "hiddenSugars", "harmfulChemicals", "isDeceptive", "simplifiedIngredients"],
-          },
-        }
-      });
-
-      if (!response.text) {
-        throw new Error("Empty response from AI engine");
-      }
-
-      const analysis = JSON.parse(response.text);
+      const analysis = await scanService.performScan(file);
       
       if (analysis.confidenceScore < 0.4) {
         setError("Image quality is too low or label is partially hidden. Analysis might be inaccurate.");
@@ -184,21 +69,9 @@ Output MUST be strictly JSON.`;
 
       setResult(processResult);
       setShowHistoryHint(true);
-
-      // 3. Save to history via backend (fire and forget)
-      try {
-        await scanService.saveResults(processResult, image || (await new Promise<string>(r => {
-          const rd = new FileReader();
-          rd.onloadend = () => r(rd.result as string);
-          rd.readAsDataURL(file);
-        })));
-      } catch (saveErr) {
-        console.warn('Failed to save to history:', saveErr);
-      }
-
     } catch (err: any) {
       console.error('Analysis failed:', err);
-      setError(err.message || 'Failed to analyze label. Please try again.');
+      setError(err.response?.data?.error || err.message || 'Failed to analyze label. Please try again.');
     } finally {
       setIsAnalyzing(false);
     }
