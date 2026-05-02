@@ -53,8 +53,8 @@ export const performScan = async (req: any, res: any) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('GEMINI_API_KEY is not defined in environment');
 
-    // Using stable v1 endpoint and explicit latest flash model as requested.
-    const GEMINI_REST_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    // Using stable v1 endpoint and explicit flash model as requested.
+    const GEMINI_REST_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const prompt = `Act as the core AI engine for "Label Truth" Health App.
 Analyze this product label Specifically for hidden sugars, harmful chemicals, and bad preservatives.
