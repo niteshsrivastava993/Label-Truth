@@ -53,8 +53,8 @@ export const performScan = async (req: any, res: any) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('GEMINI_API_KEY is not defined in environment');
 
-    // Using stable v1 endpoint and explicit flash model as requested.
-    const GEMINI_REST_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // Using v1beta endpoint as requested for maximum compatibility with recent features if needed.
+    const GEMINI_REST_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const prompt = `Act as the core AI engine for "Label Truth" Health App.
 Analyze this product label Specifically for hidden sugars, harmful chemicals, and bad preservatives.
@@ -70,7 +70,9 @@ Objectives:
 4. Truth Decoder: Translate complex ingredients to 5th-grade English.
 5. Verdict: Provide a health score (1-10), a simple 2-line explanation, and a confidence_score (0.0 to 1.0).
 
-Return ONLY JSON with this format (No markdown blocks):
+Return the response as a raw JSON string. Do not include markdown code blocks like \`\`\`json. 
+
+The JSON MUST follow this format:
 {
   "productName": "string",
   "confidenceScore": number,
@@ -94,7 +96,7 @@ Return ONLY JSON with this format (No markdown blocks):
   ]
 }
 
-Begin analysis.`;
+Begin analysis now.`;
 
     const payload = {
       contents: [
@@ -113,7 +115,7 @@ Begin analysis.`;
     };
 
     try {
-      console.log("Step 4: Calling Gemini Direct REST API (stable v1)...");
+      console.log("Step 4: Calling Gemini Direct REST API (v1beta)...");
       const geminiResponse = await axios.post(GEMINI_REST_URL, payload, {
         headers: {
           'Content-Type': 'application/json'
