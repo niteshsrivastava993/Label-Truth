@@ -26,6 +26,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
