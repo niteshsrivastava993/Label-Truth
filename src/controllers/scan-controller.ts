@@ -40,10 +40,10 @@ export const performScan = async (req: any, res: any) => {
     }
 
     // 4. Initialize AI (Strict Rule #1)
-    console.log("Step 3: Initializing Gemini with model 'gemini-1.5-pro'...");
+    console.log("Step 3: Initializing Gemini with model 'gemini-1.5-flash-latest'...");
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-pro",
+      model: "gemini-1.5-flash-latest",
       generationConfig: {
         responseMimeType: "application/json",
       }
