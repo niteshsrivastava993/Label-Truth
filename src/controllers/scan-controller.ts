@@ -1,7 +1,8 @@
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { User } from "../models/user.js";
 import { Scan } from "../models/scan.js";
 import cloudinary from "../lib/cloudinary.js";
+import axios from "axios";
 
 export const performScan = async (req: any, res: any) => {
   try {
@@ -10,16 +11,23 @@ export const performScan = async (req: any, res: any) => {
     }
 
     // 1. Upload to Cloudinary
-    const b64 = Buffer.from(req.file.buffer).toString("base64");
-    const dataURI = `data:${req.file.mimetype};base64,${b64}`;
+    console.log("Step 1: Uploading image to Cloudinary...");
+    const b64Input = Buffer.from(req.file.buffer).toString("base64");
+    const dataURI = `data:${req.file.mimetype};base64,${b64Input}`;
     
-    console.log("Uploading image to Cloudinary...");
     const cloudinaryRes = await cloudinary.uploader.upload(dataURI, {
       folder: "label_truth_scans",
     });
     const imageUrl = cloudinaryRes.secure_url;
+    console.log("Cloudinary Upload Success:", imageUrl);
 
-    // 2. Get User Profile for Context
+    // 2. Fetch image from Cloudinary as Buffer (Strict Rule #2)
+    console.log("Step 2: Fetching image from Cloudinary for Gemini...");
+    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    const imageBase64 = Buffer.from(imageResponse.data).toString('base64');
+    const imageMimeType = imageResponse.headers['content-type'] || req.file.mimetype;
+
+    // 3. Get User Profile for Context
     let healthConditions: string[] = [];
     let allergies: string[] = [];
     
@@ -31,10 +39,11 @@ export const performScan = async (req: any, res: any) => {
       }
     }
 
-    // 3. Initialize AI
+    // 4. Initialize AI (Strict Rule #1)
+    console.log("Step 3: Initializing Gemini with model 'gemini-1.5-pro'...");
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash-latest",
+      model: "gemini-1.5-pro",
       generationConfig: {
         responseMimeType: "application/json",
       }
@@ -81,59 +90,76 @@ Return ONLY JSON with this format:
 
 Output MUST be strictly JSON string only.`;
 
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: b64,
-          mimeType: req.file.mimetype
-        }
-      }
-    ]);
-
-    const response = await result.response;
-    const text = response.text();
-    let analysis;
+    // 5. Generate Content (Strict Rule #3: Try/Catch with detailed logs)
     try {
-      analysis = JSON.parse(text);
-    } catch (e) {
-      console.error("Failed to parse AI response:", text);
-      return res.status(500).json({ error: "AI response parsing failed" });
-    }
+      console.log("Calling Gemini API...");
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            data: imageBase64,
+            mimeType: imageMimeType
+          }
+        },
+        { text: prompt }
+      ]);
 
-    // 4. Save to DB if Authenticated
-    if (req.user) {
-      const scan = new Scan({
-        userId: req.user.userId,
-        productName: analysis.productName,
-        ingredients: analysis.simplifiedIngredients.map((i: any) => i.scientificName).join(", "),
-        verdict: analysis.safetyVerdict,
-        safetyVerdict: analysis.safetyVerdict,
-        overallHealthScore: analysis.overallHealthScore,
-        simpleExplanation: analysis.simpleExplanation,
-        criticalWarnings: analysis.criticalWarnings,
-        conditionImpact: analysis.conditionImpact,
-        healthScore: analysis.overallHealthScore,
-        marketingClaims: analysis.marketingClaims,
-        theReality: analysis.theReality,
-        hiddenSugars: analysis.hiddenSugars,
-        harmfulChemicals: analysis.harmfulChemicals,
-        isDeceptive: analysis.isDeceptive,
-        simplifiedIngredients: analysis.simplifiedIngredients.map((i: any) => ({
-          ...i,
-          name: i.scientificName,
-          isHarmful: i.safetyLevel === 'Avoid'
-        })),
-        imageUrl: imageUrl
-      });
-      await scan.save();
-    }
+      const response = await result.response;
+      const text = response.text();
+      let analysis;
+      try {
+        analysis = JSON.parse(text);
+      } catch (e) {
+        console.error("Failed to parse AI response JSON. Raw text:", text);
+        return res.status(500).json({ error: "AI response was not valid JSON", raw: text });
+      }
 
-    res.json({ ...analysis, imageUrl });
+      // 6. Save to DB if Authenticated
+      if (req.user) {
+        const scan = new Scan({
+          userId: req.user.userId,
+          productName: analysis.productName,
+          ingredients: analysis.simplifiedIngredients.map((i: any) => i.scientificName).join(", "),
+          verdict: analysis.safetyVerdict,
+          safetyVerdict: analysis.safetyVerdict,
+          overallHealthScore: analysis.overallHealthScore,
+          simpleExplanation: analysis.simpleExplanation,
+          criticalWarnings: analysis.criticalWarnings,
+          conditionImpact: analysis.conditionImpact,
+          healthScore: analysis.overallHealthScore,
+          marketingClaims: analysis.marketingClaims,
+          theReality: analysis.theReality,
+          hiddenSugars: analysis.hiddenSugars,
+          harmfulChemicals: analysis.harmfulChemicals,
+          isDeceptive: analysis.isDeceptive,
+          simplifiedIngredients: analysis.simplifiedIngredients.map((i: any) => ({
+            ...i,
+            name: i.scientificName,
+            isHarmful: i.safetyLevel === 'Avoid'
+          })),
+          imageUrl: imageUrl
+        });
+        await scan.save();
+      }
+
+      res.json({ ...analysis, imageUrl });
+
+    } catch (geminiErr: any) {
+      console.error("--- GEMINI API ERROR DETAILS ---");
+      if (geminiErr.response) {
+        console.error("Status:", geminiErr.response.status);
+        console.error("Data:", geminiErr.response.data);
+      }
+      console.error("Message:", geminiErr.message);
+      console.error("Stack:", geminiErr.stack);
+      throw geminiErr; // Rethrow to be caught by the outer catch
+    }
 
   } catch (error: any) {
-    console.error("Analysis Error:", error);
-    res.status(500).json({ error: error.message || "Failed to analyze product" });
+    console.error("Controller Error:", error);
+    res.status(500).json({ 
+      error: error.message || "Failed to analyze product",
+      message: "Check server logs for detailed trace"
+    });
   }
 };
 
