@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { User } from "../models/user.js";
 import { Scan } from "../models/scan.js";
 import cloudinary from "../lib/cloudinary.js";
@@ -21,8 +20,8 @@ export const performScan = async (req: any, res: any) => {
     const imageUrl = cloudinaryRes.secure_url;
     console.log("Cloudinary Upload Success:", imageUrl);
 
-    // 2. Fetch image from Cloudinary as Buffer (Strict Rule #2)
-    console.log("Step 2: Fetching image from Cloudinary for Gemini...");
+    // 2. Fetch image from Cloudinary as Buffer
+    console.log("Step 2: Fetching image from Cloudinary for Gemini REST API...");
     const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBase64 = Buffer.from(imageResponse.data).toString('base64');
     const imageMimeType = imageResponse.headers['content-type'] || req.file.mimetype;
@@ -39,16 +38,7 @@ export const performScan = async (req: any, res: any) => {
       }
     }
 
-    // 4. Initialize AI (Strict Rule #1)
-    console.log("Step 3: Initializing Gemini with model 'gemini-1.5-flash-latest'...");
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash-latest",
-      generationConfig: {
-        responseMimeType: "application/json",
-      }
-    });
-
+    // 4. Prompt Setup
     const prompt = `Act as the core AI engine for "Label Truth" Health App.
 Analyze this product label Specifically for hidden sugars, harmful chemicals, and bad preservatives.
 
@@ -90,21 +80,38 @@ Return ONLY JSON with this format:
 
 Output MUST be strictly JSON string only.`;
 
-    // 5. Generate Content (Strict Rule #3: Try/Catch with detailed logs)
-    try {
-      console.log("Calling Gemini API...");
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            data: imageBase64,
-            mimeType: imageMimeType
-          }
-        },
-        { text: prompt }
-      ]);
+    // 5. Direct REST API Call
+    const apiKey = process.env.GEMINI_API_KEY;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-      const response = await result.response;
-      const text = response.text();
+    const payload = {
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inline_data: {
+                mime_type: imageMimeType,
+                data: imageBase64
+              }
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    };
+
+    try {
+      console.log("Step 3: Calling Gemini Direct REST API...");
+      const geminiResponse = await axios.post(apiUrl, payload);
+      
+      if (!geminiResponse.data || !geminiResponse.data.candidates || geminiResponse.data.candidates.length === 0) {
+        throw new Error("Invalid response from Gemini API: No candidates returned");
+      }
+
+      const text = geminiResponse.data.candidates[0].content.parts[0].text;
       let analysis;
       try {
         analysis = JSON.parse(text);
@@ -144,14 +151,17 @@ Output MUST be strictly JSON string only.`;
       res.json({ ...analysis, imageUrl });
 
     } catch (geminiErr: any) {
-      console.error("--- GEMINI API ERROR DETAILS ---");
+      console.error("--- GEMINI DIRECT API ERROR DETAILS ---");
       if (geminiErr.response) {
         console.error("Status:", geminiErr.response.status);
-        console.error("Data:", geminiErr.response.data);
+        console.error("Data:", JSON.stringify(geminiErr.response.data, null, 2));
+      } else {
+        console.error("Error Message:", geminiErr.message);
       }
-      console.error("Message:", geminiErr.message);
-      console.error("Stack:", geminiErr.stack);
-      throw geminiErr; // Rethrow to be caught by the outer catch
+      return res.status(500).json({ 
+        error: "Gemini REST API Error", 
+        details: geminiErr.response?.data || geminiErr.message 
+      });
     }
 
   } catch (error: any) {
